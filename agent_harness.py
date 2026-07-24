@@ -8,10 +8,12 @@ Usage:
 """
 
 import argparse
+from datetime import datetime
 import json
 import os
 import subprocess
 import sys
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from google import genai
@@ -59,16 +61,15 @@ TOOL_SCHEMA = [
 
 
 def parse_command(cmd: str, api_key: str | None = None) -> dict:
-    """TODO 1: ส่ง cmd ไป Gemini พร้อม TOOL_SCHEMA ขอให้ตอบเป็น JSON {tool, args}"""
-    api_key = api_key or os.environ.get("GEMINI_API_KEY")
+    """ส่ง cmd ไป Gemini พร้อม TOOL_SCHEMA ขอให้ตอบเป็น JSON {tool, args}"""
+    api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise ValueError("ไม่พบ GEMINI_API_KEY ใน Environment Variable")
+        raise ValueError("ไม่พบ GEMINI_API_KEY หรือ GOOGLE_API_KEY ใน Environment Variable")
 
     client = genai.Client(api_key=api_key)
 
-    # Prompt บังคับให้ Gemini เลือก Tool และส่งผลลัพธ์กลับมาเป็น JSON เสมอ
     prompt = f"""คุณคือ AI Assistant สำหรับระบบ MilkLab 
-โปรดวิเคราะห์คำสั่งภาษาไทยของผู้ใช้ และเลือกใช้ Tool ที่เหมาะสมที่สุดจากรายการ TOOLS_SCHEMA ด้านล่างนี้:
+โปรดวิเคราะห์คำสั่งภาษาไทยของผู้ใช้ และเลือกใช้ Tool ที่เหมาะสมที่สุดจากรายการ TOOL_SCHEMA ด้านล่างนี้:
 
 {json.dumps(TOOL_SCHEMA, ensure_ascii=False, indent=2)}
 
@@ -105,16 +106,20 @@ def parse_command(cmd: str, api_key: str | None = None) -> dict:
         raise RuntimeError(f"เกิดข้อผิดพลาดในการ parse คำสั่งด้วย Gemini: {e}")
 
 
-def dispatch_tool(tool_call: dict) -> str:
-    """TODO 2: เรียก tool ตาม tool_call["tool"] ด้วย args จริง"""
+def dispatch_tool(tool_call: dict) -> tuple[str, str]:
+    """เรียก tool ตาม tool_call["tool"] ด้วย args จริง
+    
+    Returns:
+        tuple[str, str]: (tool_status_log, user_reply_message)
+    """
     tool_name = tool_call.get("tool")
     args = tool_call.get("args", {})
 
     if tool_name == "log_sale":
-        # เรียก sales_logger.py ผ่าน CLI
         menu = str(args.get("menu"))
-        qty = str(args.get("qty"))
-        price = str(args.get("price"))
+        qty = int(args.get("qty", 1))
+        price = float(args.get("price", 0))
+        total_price = int(qty * price)
 
         cmd = [
             sys.executable,
@@ -122,28 +127,33 @@ def dispatch_tool(tool_call: dict) -> str:
             "--menu",
             menu,
             "--qty",
-            qty,
+            str(qty),
             "--price",
-            price,
+            str(price),
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True)
+
+        # เวลาปัจจุบัน ISO8601 โซนไทย (+07)
+        now_str = datetime.now(ZoneInfo("Asia/Bangkok")).isoformat(timespec="seconds")
+
         if result.returncode == 0:
-            return f"บันทึกยอดขาย {menu} {qty} ชิ้น เรียบร้อยแล้ว"
+            tool_log = f"OK: row appended at {now_str}"
+            user_msg = f"บันทึกแล้วยอด {total_price} บาท"
+            return tool_log, user_msg
         else:
-            return f"เกิดข้อผิดพลาดในการบันทึก: {result.stderr.strip()}"
+            return f"ERROR: {result.stderr.strip()}", "เกิดข้อผิดพลาดในการบันทึก"
 
     elif tool_name == "query_sales":
         date = args.get("date")
-        return f"ดึงข้อมูลยอดขายประจำวันที่ {date} เรียบร้อยแล้ว"
+        return f"OK: sales queried for {date}", f"ดึงข้อมูลยอดขายวันที่ {date} เรียบร้อยแล้ว"
 
     elif tool_name == "send_alert":
         msg = args.get("message", "")
         send_telegram_notification(msg)
-        return f"ส่งข้อความแจ้งเตือน '{msg}' เรียบร้อยแล้ว"
+        return "OK: message sent", f"ส่งข้อความแจ้งเตือน '{msg}' เรียบร้อยแล้ว"
 
-    else:
-        return f"ไม่รู้จัก Tool ชื่อ '{tool_name}'"
+    return "ERROR: unknown tool", "ไม่สามารถประมวลผลคำสั่งได้"
 
 
 def main() -> int:
@@ -152,16 +162,24 @@ def main() -> int:
     parser.add_argument("--cmd", required=True, help="คำสั่งภาษาไทย")
     args = parser.parse_args()
 
+    # 1. พิมพ์ [USER]
     print(f"[USER] {args.cmd}")
 
-    # TODO 3: เรียก parse_command แล้ว dispatch_tool พร้อม print trace log
     try:
+        # 2. Parse คำสั่งจาก Gemini
         tool_call = parse_command(args.cmd)
-        print(f"[LLM]   tool={tool_call['tool']} args={tool_call['args']}")
 
-        result = dispatch_tool(tool_call)
-        print(f"[TOOL]  {tool_call['tool']} {result}")
-        print(f"[USER] ← {result}")
+        # จัดฟอร์แมต args ให้พิมพ์ออกมาสไตล์ {menu: นมหมี, qty: 2, price: 65}
+        formatted_args = ", ".join([f"{k}: {v}" for k, v in tool_call['args'].items()])
+        print(f"[LLM]  tool={tool_call['tool']} args={{{formatted_args}}}")
+
+        # 3. เรียก Tool และรับสถานะ
+        tool_log, user_msg = dispatch_tool(tool_call)
+
+        # 4. พิมพ์ [TOOL] และ [USER] ←
+        print(f"[TOOL] {tool_call['tool']} {tool_log}")
+        print(f"[USER] ←  {user_msg}")
+
     except Exception as e:
         print(f"[ERROR] {e}")
         return 1
