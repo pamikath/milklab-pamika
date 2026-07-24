@@ -17,6 +17,7 @@ import json
 from datetime import datetime
 import requests
 import gspread
+from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
 
 SCOPES = [
@@ -99,8 +100,9 @@ def main() -> int:
 
     # คำนวณราคารวม
     total = args.qty * args.price
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
+    tz_th = ZoneInfo("Asia/Bangkok")
+    timestamp = datetime.now(tz_th).strftime("%Y-%m-%d %H:%M:%S")
+    
     # ข้อ 4: Handle case Sheets ไม่ accessible (Catch Exceptions และ exit 1)
     try:
         client = get_sheets_client()
