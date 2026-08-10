@@ -1,72 +1,134 @@
-"""MilkLab RAG Chatbot (S3).
-
-Run locally: streamlit run app.py
-Deploy: push to GitHub then Actions deploys to HuggingFace Space
-
-นักศึกษาต้องเติม TODO 5 จุด ใน Session 3 Lab 2.2
-"""
-
-import os
-
 import streamlit as st
+import os
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from google import genai  # <--- เปลี่ยนมาใช้ SDK ตัวใหม่
+import time
+import json
+import uuid
+
+# ==========================================
+# 0. การตั้งค่าเบื้องต้น & ฟังก์ชัน Observability (Trace)
+# ==========================================
+# ตั้งค่า API Key ของ Gemini ผ่าน Client ตัวใหม่
+client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 
+def span(name):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            result = func(*args, **kwargs)
+            duration = time.time() - start_time
+
+            # เก็บข้อมูลลงไฟล์ traces.jsonl
+            trace_data = {
+                "trace_id": st.session_state.get("trace_id", str(uuid.uuid4())),
+                "span_name": name,
+                "duration_sec": round(duration, 4),
+                "timestamp": time.time()
+            }
+            with open("traces.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(trace_data) + "\n")
+
+            return result
+        return wrapper
+    return decorator
+
+
+# ==========================================
+# TODO 1, 2, 3: โหลดไฟล์, Embed และสร้าง FAISS Index
+# ==========================================
 @st.cache_resource
-def load_index():
-    """TODO 1+2+3: โหลด menu_kb.md, split เป็น chunk, encode ด้วย sentence-transformers,
-    สร้าง faiss index. Cache เพราะโหลด model ครั้งแรกใช้เวลา 30 วินาที
+def load_kb_and_index():
+    with open("menu_kb.md", "r", encoding="utf-8") as f:
+        text = f.read()
+    chunks = [c.strip() for c in text.split("\n\n")
+              if c.strip() and len(c) > 10]
 
-    Returns: (model, index, chunks_list)
+    embed_model = SentenceTransformer(
+        'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
+    embeddings = embed_model.encode(chunks)
+
+    dimension = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(np.array(embeddings).astype('float32'))
+
+    return chunks, embed_model, index
+
+
+kb_chunks, st_embed_model, faiss_index = load_kb_and_index()
+
+
+# ==========================================
+# TODO 5: ฟังก์ชัน Retrieve ค้นหาข้อมูล
+# ==========================================
+@span(name="retrieve_top_k")
+def retrieve_top_k(query, k=3):
+    query_vector = st_embed_model.encode([query]).astype('float32')
+    distances, indices = faiss_index.search(query_vector, k)
+
+    retrieved = [kb_chunks[i] for i in indices[0]]
+    return retrieved
+
+
+# ==========================================
+# TODO 6: ห่อ generate_answer ด้วย span
+# ==========================================
+@span(name="generate_answer")
+def generate_answer(query, context_chunks):
+    context_text = "\n\n".join(context_chunks)
+
+    prompt = f"""
+    คุณคือผู้ช่วยของร้าน MilkLab° กรุณาตอบคำถามลูกค้าโดยอิงจากข้อมูลต่อไปนี้เท่านั้น:
+    
+    ข้อมูลร้าน:
+    {context_text}
+    
+    คำถามลูกค้า: {query}
     """
-    raise NotImplementedError("Implement in Session 3 Lab 2.2 (TODO 1-3)")
+
+    # ใช้คำสั่ง .models.generate_content ของ SDK ตัวใหม่
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt
+    )
+    return response.text
 
 
-def retrieve_top_k(query: str, model, index, chunks: list[str], k: int = 3) -> list[str]:
-    """TODO 4: encode query, search index, return top-k chunks"""
-    raise NotImplementedError("Implement in Session 3 Lab 2.2 (TODO 4)")
+# ==========================================
+# TODO 4: สร้าง Chat UI
+# ==========================================
+st.title("🥛 MilkLab° Chatbot (RAG)")
+st.caption("แชตบอทตอบคำถามลูกค้าด้วยระบบ RAG (Retrieval-Augmented Generation)")
 
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "สวัสดีค่ะ! MilkLab° ยินดีให้บริการ มีคำถามเกี่ยวกับเมนู ราคา หรือร้าน ถามมาได้เลยนะคะ"}]
 
-def generate_answer(query: str, context_chunks: list[str]) -> str:
-    """TODO 5: ส่ง query + context ไป Gemini, return answer
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    Hint: build prompt that says "ตอบจากข้อมูลต่อไปนี้เท่านั้น ถ้าไม่มีใน context ให้บอกว่าไม่รู้"
-    """
-    raise NotImplementedError("Implement in Session 3 Lab 2.2 (TODO 5)")
+if user_query := st.chat_input("พิมพ์คำถามของคุณที่นี่... เช่น ลาเต้แก้วละเท่าไหร่?"):
 
+    st.session_state.trace_id = str(uuid.uuid4())
 
-def main():
-    st.set_page_config(page_title="MilkLab° RAG", page_icon="🥛")
-    st.title("MilkLab° RAG Chatbot")
-    st.caption("ถามอะไรเกี่ยวกับ MilkLab ได้ ตอบจาก menu_kb.md")
+    st.session_state.messages.append({"role": "user", "content": user_query})
+    with st.chat_message("user"):
+        st.markdown(user_query)
 
-    try:
-        model, index, chunks = load_index()
-    except NotImplementedError as exc:
-        st.error(f"TODO not implemented: {exc}")
-        st.stop()
+    with st.chat_message("assistant"):
+        with st.spinner("กำลังค้นหาข้อมูล..."):
+            retrieved_chunks = retrieve_top_k(user_query, k=3)
+            answer = generate_answer(user_query, retrieved_chunks)
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+            st.markdown(answer)
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+            with st.expander("🔍 Trace (Source Context)"):
+                st.write("**Top-k Chunks ที่ระบบดึงมาได้:**")
+                for i, chunk in enumerate(retrieved_chunks):
+                    st.info(f"**Chunk {i+1}:** {chunk}")
 
-    if prompt := st.chat_input("ถามอะไรเกี่ยวกับ MilkLab"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.write(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner("กำลังค้นข้อมูล..."):
-                context = retrieve_top_k(prompt, model, index, chunks)
-                answer = generate_answer(prompt, context)
-            st.write(answer)
-            with st.expander("Source chunks"):
-                for i, c in enumerate(context, 1):
-                    st.markdown(f"**[{i}]** {c}")
-        st.session_state.messages.append({"role": "assistant", "content": answer})
-
-
-if __name__ == "__main__":
-    main()
+    st.session_state.messages.append({"role": "assistant", "content": answer})
