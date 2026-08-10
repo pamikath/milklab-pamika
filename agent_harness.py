@@ -37,7 +37,7 @@ TOOL_SCHEMA = [
     },
     {
         "name": "query_sales",
-        "description": "ดูยอดขายของวันที่ระบุ",
+        "description": "ดูยอดขายของวันที่ระบุ:",
         "parameters": {
             "type": "object",
             "properties": {
