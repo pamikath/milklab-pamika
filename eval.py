@@ -1,77 +1,83 @@
-import os
-import json
-import google.generativeai as genai
-from dotenv import load_dotenv
+import matplotlib.pyplot as plt
+import numpy as np
+# TODO: Import ตัว Vector Database หรือฟังก์ชัน Query จาก app.py ของคุณมาที่นี่
+# ตัวอย่าง: from app import collection
 
-# 1. โหลดคีย์จากไฟล์ .env
-load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# 1. เตรียม Ground Truth: 10 คำถาม + ID ของ Chunk ที่ควรจะตอบคำถามนั้นได้
+ground_truths = [
+    # กลุ่มคำถามที่ควรอ้างอิง Chunk 1 (ข้อมูลร้านทั่วไป, เวลาเปิดปิด, พิกัด)
+    {"query": "ร้านเปิดกี่โมงคะ", "expected_chunk_id": "chunk_1"},
+    {"query": "วันจันทร์ร้านเปิดไหม", "expected_chunk_id": "chunk_1"},
+    {"query": "ร้านตั้งอยู่ที่ไหน", "expected_chunk_id": "chunk_1"},
 
-if not GOOGLE_API_KEY:
-    raise ValueError("ไม่พบ GOOGLE_API_KEY ในไฟล์ .env")
+    # กลุ่มคำถามที่ควรอ้างอิง Chunk 2 (เงื่อนไขการส่ง, การจอง, เมนูทางเลือก)
+    {"query": "มีเมนู vegan ไหม", "expected_chunk_id": "chunk_2"},
+    {"query": "ส่งเดลิเวอรี่ไกลแค่ไหน", "expected_chunk_id": "chunk_2"},
+    {"query": "ค่าส่งคิดยังไง", "expected_chunk_id": "chunk_2"},
+    {"query": "จองล่วงหน้าต้องทำยังไง", "expected_chunk_id": "chunk_2"},
+    {"query": "มีขั้นต่ำในการสั่งไหม", "expected_chunk_id": "chunk_2"},
 
-genai.configure(api_key=GOOGLE_API_KEY)
+    # กลุ่มคำถามที่ควรอ้างอิง Chunk 3 (เมนูและราคา)
+    {"query": "นมหมีฮอกไกโดราคาเท่าไหร่", "expected_chunk_id": "chunk_3"},
+    {"query": "นมโกโก้บราวนี่แก้วขนาดกี่ ml", "expected_chunk_id": "chunk_3"}
+]
 
-# 2. ฟังก์ชันสำหรับประเมินผล
+precisions = []
+recalls = []
+top1_scores = []
 
+print("🚀 เริ่มทำการประเมินระบบ Retrieval (Top-K = 3)...\n")
 
-def evaluate_interaction(trace_data):
-    # ปรับคีย์ด้านล่างนี้ให้ตรงกับโครงสร้างในไฟล์ traces.jsonl ของคุณ
-    user_query = trace_data.get("user_query", "ไม่มีคำถาม")
-    bot_response = trace_data.get("bot_response", "ไม่มีคำตอบ")
-    context_used = trace_data.get("context", "")
+# 2. รัน Retrieval สำหรับแต่ละคำถาม
+for item in ground_truths:
+    query = item["query"]
+    expected_id = item["expected_chunk_id"]
 
-    # สร้าง Prompt ให้ Gemini ทำหน้าที่เป็นผู้ประเมิน
-    eval_prompt = f"""
-    คุณเป็นผู้เชี่ยวชาญด้านการประเมินคุณภาพของ RAG Chatbot
-    โปรดประเมินคำตอบของแชตบอตโดยอิงจากคำถามของผู้ใช้และข้อมูลอ้างอิง (Context) ที่กำหนดให้
-    
-    คำถามของผู้ใช้: {user_query}
-    ข้อมูลอ้างอิง (Context): {context_used}
-    คำตอบของแชตบอต: {bot_response}
-    
-    จงให้คะแนนตั้งแต่ 1 ถึง 5 (5 คือดีที่สุด) ในด้านความแม่นยำ (Accuracy) และความสอดคล้อง (Relevance) พร้อมให้เหตุผลสั้นๆ
-    
-    รูปแบบการตอบ:
-    คะแนน: [1-5]/5
-    เหตุผล: [คำอธิบายของคุณ]
-    """
+    # TODO: นำคำสั่งดึงข้อมูล Vector DB ของคุณมาใส่ตรงนี้
+    # ตัวอย่างสำหรับ ChromaDB:
+    # results = collection.query(query_texts=[query], n_results=3)
+    # retrieved_ids = results['ids'][0]
+    # distances = results['distances'][0]
 
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(eval_prompt)
-    return response.text
+    # --- ข้อมูลจำลอง (ลบออกแล้วใช้ของจริง) ---
+    retrieved_ids = ["chunk_1", "chunk_5", "chunk_8"]
+    distances = [0.25, 0.45, 0.60]  # คะแนน Similarity/Distance
+    # -------------------------------------
 
-# 3. ฟังก์ชันหลักสำหรับอ่านไฟล์และรันประเมิน
+    # เก็บ Top-1 Score ไว้ทำ Histogram
+    if distances:
+        top1_scores.append(distances[0])
 
+    # เช็กว่าใน 3 อันดับแรก มี Chunk ที่ถูกต้องอยู่กี่อัน
+    hits = sum(1 for doc_id in retrieved_ids if doc_id == expected_id)
 
-def main():
-    trace_file = "traces.jsonl"
+    # 3. คำนวณ Precision@3 และ Recall@3
+    # Precision@3 = จำนวนที่ retrieve ถูก / 3
+    p_at_3 = hits / 3.0
+    precisions.append(p_at_3)
 
-    if not os.path.exists(trace_file):
-        print(
-            f"ไม่พบไฟล์ {trace_file} กรุณาตรวจสอบให้แน่ใจว่ามีการแชตเพื่อสร้าง log ไว้แล้ว")
-        return
+    # Recall@3 = จำนวนที่ retrieve ถูก / จำนวน ground-truth chunk ทั้งหมดของข้อนั้น (ในที่นี้ถือว่ามีข้อละ 1 chunk)
+    r_at_3 = hits / 1.0
+    recalls.append(r_at_3)
 
-    print("🚀 เริ่มต้นการประเมินผล (Evaluation) จากไฟล์ traces.jsonl...")
+# คำนวณค่าเฉลี่ย
+avg_p3 = np.mean(precisions)
+avg_r3 = np.mean(recalls)
 
-    with open(trace_file, 'r', encoding='utf-8') as f:
-        for index, line in enumerate(f):
-            if line.strip():
-                try:
-                    data = json.loads(line)
-                    print(f"\n--- 📝 รายการที่ {index + 1} ---")
-                    print(f"คำถาม: {data.get('user_query', 'N/A')}")
+print(f"✅ ประเมินครบ {len(ground_truths)} คำถามแล้ว!")
+print("-" * 30)
+print(f"📊 Average Precision@3 : {avg_p3:.2f}")
+print(f"📊 Average Recall@3    : {avg_r3:.2f}")
+print("-" * 30)
 
-                    # เรียกใช้งานฟังก์ชันประเมิน
-                    evaluation_result = evaluate_interaction(data)
-                    print("\n[ผลการประเมินจาก Gemini]")
-                    print(evaluation_result)
-                    print("-" * 40)
+# 4. Plot Histogram ของ Similarity Score ของ Top-1
+plt.figure(figsize=(8, 5))
+plt.hist(top1_scores, bins=5, color='skyblue', edgecolor='black')
+plt.title("Histogram of Top-1 Similarity Scores")
+plt.xlabel("Similarity Score (Distance)")
+plt.ylabel("Frequency (จำนวนคำถาม)")
+plt.grid(axis='y', alpha=0.75)
 
-                except json.JSONDecodeError:
-                    print(
-                        f"บรรทัดที่ {index + 1} ไม่สามารถอ่านรูปแบบ JSON ได้")
-
-
-if __name__ == "__main__":
-    main()
+# บันทึกเป็นไฟล์ภาพ (แทนการใช้ .show() เผื่อรันใน Codespaces)
+plt.savefig('similarity_histogram.png')
+print("📸 บันทึกกราฟ Histogram ลงไฟล์ 'similarity_histogram.png' เรียบร้อยแล้ว")
