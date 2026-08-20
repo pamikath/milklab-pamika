@@ -1,0 +1,16 @@
+name: Ping HuggingFace Space
+
+on:
+  schedule:
+    # ตั้งค่าให้ทำงานทุก 24 ชั่วโมง (เวลา 00:00 UTC ของทุกวัน)
+    - cron: '0 0 * * *'
+  # เปิดให้สามารถกดรันแบบ manual ได้ผ่านหน้าเว็บ GitHub
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Space URL
+        # เปลี่ยน URL ด้านล่างให้เป็น URL Space ของคุณ
+        run: curl -I https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME
