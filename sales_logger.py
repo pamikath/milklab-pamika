@@ -1,7 +1,7 @@
-"""MilkLab Sales Logger (S2).
+"""Dress Rental Sales Logger (S2).
 
 Usage:
-    python sales_logger.py --menu "นมหมีฮอกไกโด" --qty 2 --price 65
+    python dress_logger.py --dress "ชุดเดรสออกงาน" --qty 2 --price 350
 
 Reads GOOGLE_SHEETS_CREDENTIALS and TELEGRAM_BOT_TOKEN (or LINE_CHANNEL_TOKEN) from env.
 Appends row [timestamp, menu, qty, price, total] to a Google Sheet,
@@ -87,14 +87,16 @@ def send_line_notification(message: str) -> None:
 # Main Function
 # ------------------------------------------------------------------
 def main() -> int:
-    # ข้อ 1: อ่าน Command-line arguments (--menu, --qty, --price)
-    parser = argparse.ArgumentParser(description="MilkLab Sales Logger")
-    parser.add_argument("--menu", type=str, required=True, help="ชื่อเมนู")
-    parser.add_argument("--qty", type=int, required=True, help="จำนวนที่ขาย")
+    # ข้อ 1: อ่าน Command-line arguments (--dress, --qty, --price)
+    parser = argparse.ArgumentParser(description="Dress Rental Logger")
+    parser.add_argument("--dress", type=str, required=True,
+                        help="ชื่อชุดที่ลูกค้าเช่า")
+    parser.add_argument("--qty", type=int, required=True,
+                        help="จำนวนชุดที่เช่า")
     parser.add_argument("--price", type=float,
-                        required=True, help="ราคาต่อหน่วย")
+                        required=True, help="ราคาค่าเช่าต่อชุด")
     parser.add_argument("--sheet-name", type=str,
-                        default="Sales_Logger", help="ชื่อไฟล์ Google Sheet")
+                        default="Rental_Logger", help="ชื่อไฟล์ Google Sheet")
 
     args = parser.parse_args()
 
@@ -102,7 +104,7 @@ def main() -> int:
     total = args.qty * args.price
     tz_th = ZoneInfo("Asia/Bangkok")
     timestamp = datetime.now(tz_th).strftime("%Y-%m-%d %H:%M:%S")
-    
+
     # ข้อ 4: Handle case Sheets ไม่ accessible (Catch Exceptions และ exit 1)
     try:
         client = get_sheets_client()
@@ -118,18 +120,18 @@ def main() -> int:
         print(" 3. ตรวจสอบชื่อไฟล์ Google Sheet ว่าตรงกันหรือไม่\n")
         sys.exit(1)
 
-    # ข้อ 2: Append row [timestamp, menu, qty, price, total] ลง Sheets
-    row_data = [timestamp, args.menu, args.qty, args.price, total]
+    # ข้อ 2: Append row [timestamp, dress, qty, price, total] ลง Sheets
+    row_data = [timestamp, args.dress, args.qty, args.price, total]
     sheet.append_row(row_data)
-    print(f"✅ บันทึกยอดขายสำเร็จ: {row_data}")
+    print(f"✅ บันทึกรายการเช่าสำเร็จ: {row_data}")
 
     # ข้อ 3: ส่ง Notification เข้า Bot
     notify_msg = (
-        f"🥛 *MilkLab Sales Alert*\n"
+        f"👗 *Dress Rental Alert*\n"
         f"---------------------\n"
-        f"📌 *เมนู:* {args.menu}\n"
-        f"🔢 *จำนวน:* {args.qty} แก้ว\n"
-        f"💵 *ราคาต่อแก้ว:* {args.price} บาท\n"
+        f"📌 *ชื่อชุด:* {args.dress}\n"
+        f"🔢 *จำนวน:* {args.qty} ชุด\n"
+        f"💵 *ราคาเช่าต่อชุด:* {args.price} บาท\n"
         f"💰 *ยอดรวม:* {total:.2f} บาท\n"
         f"🕒 *เวลา:* {timestamp}"
     )
