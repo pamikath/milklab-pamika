@@ -23,21 +23,21 @@ from sales_logger import send_line_notification, send_telegram_notification
 
 TOOL_SCHEMA = [
     {
-        "name": "log_sale",
-        "description": "บันทึกการขายลง Google Sheets และส่ง notification",
+        "name": "log_sale", 
+        "description": "บันทึกการเช่าชุดลง Google Sheets และส่ง notification",
         "parameters": {
             "type": "object",
             "properties": {
-                "menu": {"type": "string", "description": "ชื่อเมนู"},
-                "qty": {"type": "integer", "description": "จำนวนที่ขาย"},
-                "price": {"type": "number", "description": "ราคาต่อหน่วย"},
+                "dress": {"type": "string", "description": "ชื่อชุดที่เช่า"},
+                "qty": {"type": "integer", "description": "จำนวนชุดที่เช่า"},
+                "price": {"type": "number", "description": "ราคาค่าเช่าต่อชุด"},
             },
-            "required": ["menu", "qty", "price"],
+            "required": ["dress", "qty", "price"],
         },
     },
     {
         "name": "query_sales",
-        "description": "ดูยอดขายของวันที่ระบุ",
+        "description": "ดูยอดการเช่าชุดของวันที่ระบุ",
         "parameters": {
             "type": "object",
             "properties": {
@@ -68,7 +68,7 @@ def parse_command(cmd: str, api_key: str | None = None) -> dict:
 
     client = genai.Client(api_key=api_key)
 
-    prompt = f"""คุณคือ AI Assistant สำหรับระบบ MilkLab 
+    prompt = f"""คุณคือ AI Assistant สำหรับระบบร้านเช่าชุด 
 โปรดวิเคราะห์คำสั่งภาษาไทยของผู้ใช้ และเลือกใช้ Tool ที่เหมาะสมที่สุดจากรายการ TOOL_SCHEMA ด้านล่างนี้:
 
 {json.dumps(TOOL_SCHEMA, ensure_ascii=False, indent=2)}
@@ -82,7 +82,7 @@ def parse_command(cmd: str, api_key: str | None = None) -> dict:
 }}
 
 ตัวอย่างเช่น:
-{{"tool": "log_sale", "args": {{"menu": "นมหมี", "qty": 2, "price": 65.0}}}}
+{{"tool": "log_sale", "args": {{"dress": "ชุดเดรส", "qty": 2, "price": 1600.0}}}}
 """
 
     try:
@@ -116,7 +116,7 @@ def dispatch_tool(tool_call: dict) -> tuple[str, str]:
     args = tool_call.get("args", {})
 
     if tool_name == "log_sale":
-        menu = str(args.get("menu"))
+        dress = str(args.get("dress", ""))
         qty = int(args.get("qty", 1))
         price = float(args.get("price", 0))
         total_price = int(qty * price)
@@ -124,8 +124,8 @@ def dispatch_tool(tool_call: dict) -> tuple[str, str]:
         cmd = [
             sys.executable,
             "sales_logger.py",
-            "--menu",
-            menu,
+            "--dress",
+            dress,
             "--qty",
             str(qty),
             "--price",
@@ -139,14 +139,14 @@ def dispatch_tool(tool_call: dict) -> tuple[str, str]:
 
         if result.returncode == 0:
             tool_log = f"OK: row appended at {now_str}"
-            user_msg = f"บันทึกแล้วยอด {total_price} บาท"
+            user_msg = f"บันทึกรายการเช่าชุด {dress} เรียบร้อยแล้ว ยอดรวม {total_price} บาท"
             return tool_log, user_msg
         else:
             return f"ERROR: {result.stderr.strip()}", "เกิดข้อผิดพลาดในการบันทึก"
 
     elif tool_name == "query_sales":
         date = args.get("date")
-        return f"OK: sales queried for {date}", f"ดึงข้อมูลยอดขายวันที่ {date} เรียบร้อยแล้ว"
+        return f"OK: sales queried for {date}", f"ดึงข้อมูลยอดการเช่าชุดของวันที่ {date} เรียบร้อยแล้ว"
 
     elif tool_name == "send_alert":
         msg = args.get("message", "")
@@ -169,7 +169,7 @@ def main() -> int:
         # 2. Parse คำสั่งจาก Gemini
         tool_call = parse_command(args.cmd)
 
-        # จัดฟอร์แมต args ให้พิมพ์ออกมาสไตล์ {menu: นมหมี, qty: 2, price: 65}
+        # จัดฟอร์แมต args ให้พิมพ์ออกมาสไตล์ {dress: ชุดเดรส, qty: 2, price: 1600}
         formatted_args = ", ".join([f"{k}: {v}" for k, v in tool_call['args'].items()])
         print(f"[LLM]  tool={tool_call['tool']} args={{{formatted_args}}}")
 

@@ -42,7 +42,7 @@ def span(name):
 # ==========================================
 @st.cache_resource
 def load_kb_and_index():
-    with open("menu_kb.md", "r", encoding="utf-8") as f:
+    with open("fashion_kb.md", "r", encoding="utf-8") as f:
         text = f.read()
     chunks = [c.strip() for c in text.split("\n\n")
               if c.strip() and len(c) > 10]
@@ -81,17 +81,15 @@ def generate_answer(query, context_chunks):
     context_text = "\n\n".join(context_chunks)
 
     prompt = f"""
-    คุณคือผู้ช่วยของร้าน MilkLab° กรุณาตอบคำถามลูกค้าโดยอิงจากข้อมูลต่อไปนี้เท่านั้น:
+    คุณคือผู้ช่วยของร้านเช่าชุด กรุณาตอบคำถามลูกค้าโดยอิงจากข้อมูลต่อไปนี้เท่านั้น:
     
     ข้อมูลร้าน:
     {context_text}
     
     คำถามลูกค้า: {query}
     """
-
-    # ใช้คำสั่ง .models.generate_content ของ SDK ตัวใหม่
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-2.5-flash', 
         contents=prompt
     )
     return response.text
@@ -100,18 +98,20 @@ def generate_answer(query, context_chunks):
 # ==========================================
 # TODO 4: สร้าง Chat UI
 # ==========================================
-st.title("🥛 MilkLab° Chatbot (RAG)")
+st.title("👗 แชตบอทร้านเช่าชุด (RAG)")
 st.caption("แชตบอทตอบคำถามลูกค้าด้วยระบบ RAG (Retrieval-Augmented Generation)")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "สวัสดีค่ะ! MilkLab° ยินดีให้บริการ มีคำถามเกี่ยวกับเมนู ราคา หรือร้าน ถามมาได้เลยนะคะ"}]
+        {"role": "assistant", "content": "สวัสดีค่ะ! 👗 ร้านเช่าชุดยินดีให้บริการ มีคำถามเกี่ยวกับประเภทชุด ราคา หรือเงื่อนไขการเช่า ถามมาได้เลยนะคะ"}
+    ]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if user_query := st.chat_input("พิมพ์คำถามของคุณที่นี่... เช่น ลาเต้แก้วละเท่าไหร่?"):
+# เปลี่ยน placeholder ตรงช่องพิมพ์แชตให้เป็นตัวอย่างของร้านเช่าชุด
+if user_query := st.chat_input("พิมพ์คำถามของคุณที่นี่... เช่น ชุดราตรียาวราคาเช่าเท่าไหร่?"):
 
     st.session_state.trace_id = str(uuid.uuid4())
 
